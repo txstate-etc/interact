@@ -539,16 +539,8 @@ class H5PContentAdmin {
     // Save new content
     $content['id'] = $core->saveContent($content);
 
-    // Create content directory
-    $editor = $this->get_h5peditor_instance();
-    if (!$editor->createDirectories($content['id'])) {
-      $core->h5pF->setErrorMessage(__('Unable to create content directory.', $this->plugin_slug));
-      // Remove content.
-      $core->h5pF->deleteContentData($content['id']);
-      return FALSE;
-    }
-
     // Move images and find all content dependencies
+    $editor = $this->get_h5peditor_instance();
     $editor->processParameters($content['id'], $content['library'], $params, $oldLibrary, $oldParams);
     //$content['params'] = json_encode($params);
     return $content['id'];
@@ -797,7 +789,8 @@ class H5PContentAdmin {
     // Format time
     $time = strtotime($timestamp);
     $current_time = current_time('timestamp');
-    $human_time = human_time_diff($time + $offset, $current_time) . ' ' . __('ago', $this->plugin_slug);
+    $timediff = human_time_diff($time + $offset, $current_time);
+    $human_time = sprintf(__('%s ago', $this->plugin_slug), $timediff);
 
     if ($current_time > $time + DAY_IN_SECONDS) {
       // Over a day old, swap human time for formatted time
@@ -913,9 +906,7 @@ class H5PContentAdmin {
       $plugin = H5P_Plugin::get_instance();
       self::$h5peditor = new H5peditor(
         $plugin->get_h5p_instance('core'),
-        new H5PEditorWordPressStorage(),
-        '',
-        $plugin->get_h5p_path()
+        new H5PEditorWordPressStorage()
       );
     }
 
@@ -1015,7 +1006,7 @@ class H5PContentAdmin {
 
     if ($name) {
       $plugin = H5P_Plugin::get_instance();
-      print $editor->getLibraryData($name, $major_version, $minor_version, $plugin->get_language(), $plugin->get_h5p_path());
+      print $editor->getLibraryData($name, $major_version, $minor_version, $plugin->get_language());
 
       // Log library load
       new H5P_Event('library', NULL,
@@ -1035,6 +1026,8 @@ class H5PContentAdmin {
    * @since 1.1.0
    */
   public function ajax_files() {
+    global $wpdb;
+
     $plugin = H5P_Plugin::get_instance();
     $files_directory = $plugin->get_h5p_path();
 
@@ -1043,18 +1036,10 @@ class H5PContentAdmin {
       exit;
     }
 
+    // Get Content ID for upload
     $contentId = filter_input(INPUT_POST, 'contentId', FILTER_SANITIZE_NUMBER_INT);
-    if ($contentId) {
-      $files_directory .=  '/content/' . $contentId;
-    }
-    else {
-      $files_directory .= '/editor';
-    }
 
-    $editor = $this->get_h5peditor_instance();
-    $interface = $plugin->get_h5p_instance('interface');
-    $file = new H5peditorFile($interface, $files_directory);
-
+    $file = new H5peditorFile($plugin->get_h5p_instance('interface'));
     if (!$file->isLoaded()) {
       H5PCore::ajaxError(__('File not found on server. Check file upload settings.', $this->plugin_slug));
       exit;
@@ -1068,9 +1053,17 @@ class H5PContentAdmin {
       }
     }
 
-    if ($file->validate() && $file->copy()) {
+    // Make sure file is valid
+    if ($file->validate()) {
+      $core = $plugin->get_h5p_instance('core');
+
+      // Save the valid file
+      $file_id = $core->fs->saveFile($file, $contentId);
+
       // Keep track of temporary files so they can be cleaned up later.
-      $editor->addTmpFile($file);
+      $wpdb->insert($wpdb->prefix . 'h5p_tmpfiles',
+          array('path' => $file_id, 'created_at' => time()),
+          array('%s', '%d'));
 
       // Clear cached value for dirsize.
       delete_transient('dirsize_cache');
@@ -1078,10 +1071,7 @@ class H5PContentAdmin {
 
     header('Cache-Control: no-cache');
 
-    // Must support IE, so cannot use application/json
-    header('Content-type: text/plain; charset=utf-8');
-
-    print $file->getResult();
+    $file->printResult();
     exit;
   }
 

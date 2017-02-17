@@ -24,7 +24,7 @@ class H5P_Plugin {
    * @since 1.0.0
    * @var string
    */
-  const VERSION = '1.7.9';
+  const VERSION = '1.7.11';
 
   /**
    * The Unique identifier for this plugin.
@@ -298,6 +298,13 @@ class H5P_Plugin {
       library_id INT UNSIGNED NOT NULL,
       hash VARCHAR(64) NOT NULL,
       PRIMARY KEY  (library_id,hash)
+    ) {$charset};");
+
+    dbDelta("CREATE TABLE {$wpdb->prefix}h5p_tmpfiles (
+      path VARCHAR(255) NOT NULL,
+      created_at INT UNSIGNED NOT NULL,
+      PRIMARY KEY  (path),
+      KEY created_at (created_at)
     ) {$charset};");
 
     // Add default setting options
@@ -954,14 +961,9 @@ class H5P_Plugin {
       'baseUrl' => get_site_url(),
       'url' => $this->get_h5p_url(),
       'postUserStatistics' => (get_option('h5p_track_user', TRUE) === '1') && $current_user->ID,
-      'ajaxPath' => admin_url('admin-ajax.php?action=h5p_'),
       'ajax' => array(
-        'setFinished' => admin_url('admin-ajax.php?action=h5p_setFinished'),
-        'contentUserData' => admin_url('admin-ajax.php?action=h5p_contents_user_data&content_id=:contentId&data_type=:dataType&sub_content_id=:subContentId')
-      ),
-      'tokens' => array(
-        'result' => wp_create_nonce('h5p_result'),
-        'contentUserData' => wp_create_nonce('h5p_contentuserdata')
+        'setFinished' => admin_url('admin-ajax.php?token=' . wp_create_nonce('h5p_result') . '&action=h5p_setFinished'),
+        'contentUserData' => admin_url('admin-ajax.php?token=' . wp_create_nonce('h5p_contentuserdata') . '&action=h5p_contents_user_data&content_id=:contentId&data_type=:dataType&sub_content_id=:subContentId')
       ),
       'saveFreq' => get_option('h5p_save_content_state', FALSE) ? get_option('h5p_save_content_frequency', 30) : FALSE,
       'siteUrl' => get_site_url(),
@@ -1092,38 +1094,63 @@ class H5P_Plugin {
    * @since 1.0.0
    */
   public function remove_old_tmp_files() {
-    $plugin = H5P_Plugin::get_instance();
+    global $wpdb;
 
-    $h5p_path = $plugin->get_h5p_path();
+    $older_than = time() - 86400;
+    $num = 0; // Number of files deleted
+
+    // Locate files not saved in over a day
+    $files = $wpdb->get_results($wpdb->prepare(
+        "SELECT path
+           FROM {$wpdb->prefix}h5p_tmpfiles
+          WHERE created_at < %d",
+        $older_than)
+      );
+
+    // Delete files from file system
+    foreach ($files as $file) {
+      if (@unlink($file->path)) {
+        $num++;
+      }
+    }
+
+    // Remove from tmpfiles table
+    $wpdb->query($wpdb->prepare(
+        "DELETE FROM {$wpdb->prefix}h5p_tmpfiles
+          WHERE created_at < %d",
+        $older_than));
+
+    // Old way of cleaning up tmp files. Needed as a transitional fase and it doesn't really harm to have it here any way.
+    $h5p_path = $this->get_h5p_path();
     $editor_path = $h5p_path . DIRECTORY_SEPARATOR . 'editor';
-    if (!is_dir($h5p_path) || !is_dir($editor_path)) {
-      return;
-    }
+    if (is_dir($h5p_path) && is_dir($editor_path)) {
+      $dirs = glob($editor_path . DIRECTORY_SEPARATOR . '*');
+      if (!empty($dirs)) {
+        foreach ($dirs as $dir) {
+          if (!is_dir($dir)) {
+            continue;
+          }
 
-    $dirs = glob($editor_path . DIRECTORY_SEPARATOR . '*');
-    if (empty($dirs)) {
-      return;
-    }
+          $files = glob($dir . DIRECTORY_SEPARATOR . '*');
+          if (empty($files)) {
+            continue;
+          }
 
-    foreach ($dirs as $dir) {
-      if (!is_dir($dir)) {
-        continue;
-      }
-
-      $files = glob($dir . DIRECTORY_SEPARATOR . '*');
-      if (empty($files)) {
-        continue;
-      }
-
-      foreach ($files as $file) {
-        if (time() - filemtime($file) > 86400) {
-          // Not modified in over a day
-          unlink($file);
-
-          // Clear cached value for dirsize.
-          delete_transient('dirsize_cache');
+          foreach ($files as $file) {
+            if (filemtime($file) < $older_than) {
+              // Not modified in over a day
+              if (unlink($file)) {
+                $num++;
+              }
+            }
+          }
         }
       }
+    }
+
+    if ($num) {
+      // Clear cached value for dirsize.
+      delete_transient('dirsize_cache');
     }
   }
 
