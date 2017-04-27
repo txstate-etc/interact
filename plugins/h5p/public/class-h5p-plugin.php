@@ -24,7 +24,7 @@ class H5P_Plugin {
    * @since 1.0.0
    * @var string
    */
-  const VERSION = '1.7.13';
+  const VERSION = '1.8.2';
 
   /**
    * The Unique identifier for this plugin.
@@ -141,6 +141,9 @@ class H5P_Plugin {
     $plugin = self::get_instance();
     $plugin->get_library_updates();
 
+    // Always check setup requirements when activating
+    update_option('h5p_check_h5p_requirements', TRUE);
+
     // Cleaning rutine
     wp_schedule_event(time() + (3600 * 24), 'daily', 'h5p_daily_cleanup');
   }
@@ -250,9 +253,38 @@ class H5P_Plugin {
       drop_library_css TEXT NULL,
       semantics TEXT NOT NULL,
       tutorial_url VARCHAR(1023) NOT NULL,
+      has_icon INT UNSIGNED NOT NULL DEFAULT 0,
       PRIMARY KEY  (id),
       KEY name_version (name,major_version,minor_version,patch_version),
       KEY runnable (runnable)
+    ) {$charset};");
+
+    // Keep track of h5p libraries content type cache
+    dbDelta("CREATE TABLE {$wpdb->base_prefix}h5p_libraries_hub_cache (
+      id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+      machine_name VARCHAR(127) NOT NULL,
+      major_version INT UNSIGNED NOT NULL,
+      minor_version INT UNSIGNED NOT NULL,
+      patch_version INT UNSIGNED NOT NULL,
+      h5p_major_version INT UNSIGNED,
+      h5p_minor_version INT UNSIGNED,
+      title VARCHAR(255) NOT NULL,
+      summary TEXT NOT NULL,
+      description TEXT NOT NULL,
+      icon VARCHAR(511) NOT NULL,
+      created_at INT UNSIGNED NOT NULL,
+      updated_at INT UNSIGNED NOT NULL,
+      is_recommended INT UNSIGNED NOT NULL,
+      popularity INT UNSIGNED NOT NULL,
+      screenshots TEXT,
+      license TEXT,
+      example VARCHAR(511) NOT NULL,
+      tutorial VARCHAR(511),
+      keywords TEXT,
+      categories TEXT,
+      owner VARCHAR(511),
+      PRIMARY KEY  (id),
+      KEY name_version (machine_name,major_version,minor_version,patch_version)
     ) {$charset};");
 
     // Keep track of h5p library dependencies
@@ -301,9 +333,10 @@ class H5P_Plugin {
     ) {$charset};");
 
     dbDelta("CREATE TABLE {$wpdb->prefix}h5p_tmpfiles (
+      id INT UNSIGNED NOT NULL AUTO_INCREMENT,
       path VARCHAR(255) NOT NULL,
       created_at INT UNSIGNED NOT NULL,
-      PRIMARY KEY  (path),
+      PRIMARY KEY  (id),
       KEY created_at (created_at)
     ) {$charset};");
 
@@ -314,9 +347,13 @@ class H5P_Plugin {
     add_option('h5p_copyright', TRUE);
     add_option('h5p_icon', TRUE);
     add_option('h5p_track_user', TRUE);
-    add_option('h5p_ext_communication', TRUE);
     add_option('h5p_save_content_state', FALSE);
     add_option('h5p_save_content_frequency', 30);
+    add_option('h5p_site_key', get_option('h5p_h5p_site_uuid', FALSE));
+    add_option('h5p_content_type_cache_updated_at', 0);
+    add_option('h5p_check_h5p_requirements', FALSE);
+    add_option('h5p_hub_is_enabled', TRUE);
+    add_option('h5p_send_usage_statistics', TRUE);
   }
 
   /**
@@ -354,6 +391,8 @@ class H5P_Plugin {
    * @since 1.2.0
    */
   public static function check_for_updates() {
+    global $wpdb;
+
     $current_version = get_option('h5p_version');
     if ($current_version === self::VERSION) {
       return; // Same version as before
@@ -368,12 +407,32 @@ class H5P_Plugin {
     // Split version number
     $v = self::split_version($current_version);
 
+    $between_1710_1713 = ($v->major === 1 && $v->minor === 7 && $v->patch >= 10 && $v->patch <= 13); // Target 1.7.10, 1.7.11, 1.7.12, 1.7.13
+    if ($between_1710_1713) {
+      // Fix tmpfiles table manually :-)
+      $wpdb->query("ALTER TABLE {$wpdb->prefix}h5p_tmpfiles ADD COLUMN id INT UNSIGNED NOT NULL AUTO_INCREMENT FIRST, DROP PRIMARY KEY, ADD PRIMARY KEY(id)");
+    }
+
     // Check and update database
     self::update_database();
 
+    $pre_120 = ($v->major < 1 || ($v->major === 1 && $v->minor < 2)); // < 1.2.0
+    $pre_180 = ($v->major < 1 || ($v->major === 1 && $v->minor < 8)); // < 1.8.0
+
     // Run version specific updates
-    if ($v->major < 1 || ($v->major === 1 && $v->minor < 2)) { // < 1.2.0
+    if ($pre_120) {
+      // Re-assign all permissions
       self::upgrade_120();
+    }
+    elseif ($pre_180) {
+      // Do not run if upgrade_120 runs
+      // Does only add the new permissions
+      self::upgrade_180();
+    }
+
+    if ($pre_180) {
+      // Force requirements check when hub is introduced.
+      update_option('h5p_check_h5p_requirements', TRUE);
     }
 
     // Keep track of which version of the plugin we have.
@@ -438,6 +497,26 @@ class H5P_Plugin {
   }
 
   /**
+   * Add new permissions introduced with hub in 1.8.0.
+   *
+   * @since 1.8.0
+   * @global \WP_Roles $wp_roles
+   */
+  public static function upgrade_180() {
+    global $wp_roles;
+    if (!isset($wp_roles)) {
+      $wp_roles = new WP_Roles();
+    }
+
+    $all_roles = $wp_roles->roles;
+    foreach ($all_roles as $role_name => $role_info) {
+      $role = get_role($role_name);
+
+      self::map_capability($role, $role_info, 'edit_others_pages', 'install_recommended_h5p_libraries');
+    }
+  }
+
+  /**
    * Remove duplicate keys that might have been created by a bug in dbDelta.
    *
    * @since 1.2.0
@@ -486,6 +565,7 @@ class H5P_Plugin {
         self::map_capability($role, $role_info, 'install_plugins', 'disable_h5p_security');
       }
       self::map_capability($role, $role_info, 'manage_options', 'manage_h5p_libraries');
+      self::map_capability($role, $role_info, 'edit_others_pages', 'install_recommended_h5p_libraries');
       self::map_capability($role, $role_info, 'edit_others_pages', 'edit_others_h5p_contents');
       self::map_capability($role, $role_info, 'edit_posts', 'edit_h5p_contents');
       self::map_capability($role, $role_info, 'read', 'view_h5p_results');
@@ -998,7 +1078,8 @@ class H5P_Plugin {
           'cancelLabel' => __('Cancel', $this->plugin_slug),
           'confirmLabel' => __('Confirm', $this->plugin_slug)
         )
-      )
+      ),
+      'hubIsEnabled' => get_option('h5p_hub_is_enabled', TRUE) == TRUE
     );
 
     if ($current_user->ID) {
@@ -1161,7 +1242,7 @@ class H5P_Plugin {
    * @since 1.2.0
    */
   public function get_library_updates() {
-    if (get_option('h5p_ext_communication', TRUE)) {
+    if (get_option('h5p_hub_is_enabled', TRUE) || get_option('h5p_send_usage_statistics', TRUE)) {
       $core = $this->get_h5p_instance('core');
       $core->fetchLibrariesMetadata();
     }

@@ -4,7 +4,7 @@ Donate link: http://h5p.org
 Tags: interactive content, content, interactive video, quiz, drag and drop, multiple choice, hot spots, collage, memory game, cloze test, game, free, export, elearning, e-learning, learning, education, xAPI, html5, responsive
 Requires at least: 3.8.1
 Tested up to: 4.7
-Stable tag: 1.7.13
+Stable tag: 1.8.2
 License: MIT
 License URI: http://opensource.org/licenses/MIT
 
@@ -294,3 +294,12 @@ Fixed issue when generating export for some sites where the web server would rep
 
 = 1.7.13 =
 Fixed editor issue related to a problem with fieldsets in IE (not able to expand)
+
+= 1.8.0 =
+Added H5P Hub interface for selecting and installing content types
+Improved requirements checking
+Added support for important description in editor
+Minor improvements and bug fixes
+
+= 1.8.1 =
+Removed functions dependendant on PHP >5.4.
