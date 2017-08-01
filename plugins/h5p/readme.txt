@@ -3,8 +3,8 @@ Contributors: icc0rz, fnoks, falcon28
 Donate link: http://h5p.org
 Tags: interactive content, content, interactive video, quiz, drag and drop, multiple choice, hot spots, collage, memory game, cloze test, game, free, export, elearning, e-learning, learning, education, xAPI, html5, responsive
 Requires at least: 3.8.1
-Tested up to: 4.7
-Stable tag: 1.8.2
+Tested up to: 4.8
+Stable tag: 1.8.4
 License: MIT
 License URI: http://opensource.org/licenses/MIT
 
@@ -303,3 +303,23 @@ Minor improvements and bug fixes
 
 = 1.8.1 =
 Removed functions dependendant on PHP >5.4.
+
+= 1.8.3 =
+Fixed support for combining header styles with other text formating options.
+Added .wav files to whitelist.
+Added video quality naming option (currently, only used by Interactive Video).
+Only allow for a single video source when using YouTube (others doesn't work).
+Improved keyboard navigation with H5P Hub.
+Updated NL and DE translations.
+Other minor bug fixes and improvements.
+
+= 1.8.4 =
+Changed H5P's weight in the 'Create New' menu to avoid always being place on top.
+Improved SQL mode compatibility.
+Improved requirement checks compatibility with different PHP versions.
+Added version selector for the different licenses.
+Added support for localized licenses.
+Minor code improvements in core.
+Updated translations.
+Minor design layout improvements in editor.
+Added external event for when changing and loading library in editor.
