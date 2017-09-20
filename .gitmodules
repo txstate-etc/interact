@@ -1,0 +1,3 @@
+[submodule "plugins/h5p"]
+	path = plugins/h5p
+	url = https://github.com/h5p/h5p-wordpress-plugin
