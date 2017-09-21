@@ -6,6 +6,7 @@ This repo is to store all the plugins used by the interact server which manages 
 Example of how to update h5p WordPress plugin:
 ```
 git checkout master
+git submodule update
 cd plugins/h5p
 git pull
 # Substitute latest tag that works with current WordPress instance.
